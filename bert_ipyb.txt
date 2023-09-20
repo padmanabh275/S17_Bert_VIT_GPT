@@ -1,0 +1,86 @@
+# =============================================================================
+# Libs
+# =============================================================================
+from torch.utils.data import Dataset
+import torch.nn.functional as F
+from collections import Counter
+from os.path import exists
+import torch.optim as optim
+import torch.nn as nn
+import numpy as np
+import random
+import torch
+import math
+import re
+
+!git clone https://github.com/deepanshudashora/custom_models.git
+
+from custom_models.transformers.model import Transformer
+from custom_models.transformers.datamodules.bert_datamodule import SentencesDataset,create_sentences_and_vocab
+from custom_models.transformers.bert.train import train_bert
+
+def get_batch(loader, loader_iter):
+    try:
+        batch = next(loader_iter)
+    except StopIteration:
+        loader_iter = iter(loader)
+        batch = next(loader_iter)
+    return batch, loader_iter
+	
+
+# =============================================================================
+# #Init
+# =============================================================================
+print('initializing..')
+batch_size = 1024
+seq_len = 20
+embed_size = 128
+inner_ff_size = embed_size * 4
+n_heads = 8
+n_code = 8
+n_vocab = 40000
+dropout = 0.1
+# n_workers = 12
+
+optim_kwargs = {'lr':1e-4, 'weight_decay':1e-4, 'betas':(.9,.999)}
+
+#1) load text
+print('loading text...')
+sentence_path = 'training.txt'
+vocab_path = "vocab.txt"
+
+sentences, vocab = create_sentences_and_vocab(sentence_path,vocab_path)
+print('creating dataset...')
+dataset = SentencesDataset(sentences, vocab, seq_len)
+# kwargs = {'num_workers':n_workers, 'shuffle':True,  'drop_last':True, 'pin_memory':True, 'batch_size':batch_size}
+kwargs = {'shuffle':True,  'drop_last':True, 'pin_memory':True, 'batch_size':batch_size}
+data_loader = torch.utils.data.DataLoader(dataset, **kwargs)
+
+
+# =============================================================================
+#init model
+print('initializing model...')
+model = Transformer(n_code=n_code, n_heads=n_heads, embed_size=embed_size, inner_ff_size=inner_ff_size, n_embeddings=len(dataset.vocab), seq_len=seq_len, dropout=dropout)
+model = model.cuda()
+
+# =============================================================================
+# Optimizer
+# =============================================================================
+print('initializing optimizer and loss...')
+optimizer = optim.Adam(model.parameters(), **optim_kwargs)
+loss_model = nn.CrossEntropyLoss(ignore_index=dataset.IGNORE_IDX)
+
+model = train_bert(model,optimizer,data_loader,loss_model)
+
+
+# =============================================================================
+# Results analysis
+# =============================================================================
+print('saving embeddings...')
+N = 3000
+np.savetxt('values.tsv', np.round(model.embeddings.weight.detach().cpu().numpy()[0:N], 2), delimiter='\t', fmt='%1.2f')
+s = [dataset.rvocab[i] for i in range(N)]
+open('names.tsv', 'w+').write('\n'.join(s) )
+
+
+print('end')

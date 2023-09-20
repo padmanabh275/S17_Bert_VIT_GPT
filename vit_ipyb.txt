@@ -1,0 +1,111 @@
+import matplotlib.pyplot as plt
+import torch
+import torchvision
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+from torch import nn
+from torchvision import transforms
+from torchinfo import summary
+
+!git clone https://github.com/deepanshudashora/custom_models.git
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+device
+
+image_path = "pizza_steak_sushi"
+train_dir = image_path + "/train"
+test_dir = image_path + "/test"
+
+# Create image size (from Table 3 in the ViT paper) 
+IMG_SIZE = 224
+
+# Create transform pipeline manually
+manual_transforms = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+])           
+print(f"Manually created transforms: {manual_transforms}")
+
+# Set the batch size
+from custom_models.transformers.datamodules.vit_datamodule import create_dataloaders
+BATCH_SIZE = 32 # this is lower than the ViT paper but it's because we're starting small
+
+# Create data loaders
+train_dataloader, test_dataloader, class_names = create_dataloaders(
+    train_dir=train_dir,
+    test_dir=test_dir,
+    transform=manual_transforms, # use manually created transforms
+    batch_size=BATCH_SIZE
+)
+
+train_dataloader, test_dataloader, class_names
+
+# Get a batch of images
+image_batch, label_batch = next(iter(train_dataloader))
+# Get a single image from the batch
+image, label = image_batch[0], label_batch[0]
+# View the batch shapes
+image.shape, label
+
+
+# Create example values
+height = 224 # H ("The training resolution is 224.")
+width = 224 # W
+color_channels = 3 # C
+patch_size = 16 # P
+# Calculate N (number of patches)
+number_of_patches = int((height * width) / patch_size**2)
+print(f"Number of patches (N) with image height (H={height}), width (W={width}) and patch size (P={patch_size}): {number_of_patches}
+
+
+# HWC>>N P*P.C
+# Input shape (this is the size of a single image)
+embedding_layer_input_shape = (height, width, color_channels)
+# Output shape
+embedding_layer_output_shape = (number_of_patches, patch_size**2 * color_channels)
+print(f"Input shape (single 2D image): {embedding_layer_input_shape}")
+print(f"Output shape (single 2D image flattened into patches): {embedding_layer_output_shape}")
+
+
+from custom_models.transformers.model import Transformer
+
+vit = Transformer(n_heads=12, block_size=16, num_layers=12, num_classes=len(class_names),algorithm="VIT")
+
+
+from torchinfo import summary
+
+# Print a summary of our custom ViT model using torchinfo (uncomment for actual output)
+summary(model=vit, 
+        input_size=(32, 3, 224, 224), # (batch_size, color_channels, height, width)
+        # col_names=["input_size"], # uncomment for smaller output
+        col_names=["input_size", "output_size", "num_params", "trainable"],
+        col_width=20,
+        row_settings=["var_names"]
+)
+
+
+from super_repo import data_setup, engine, utils
+vit = Transformer(n_heads=12, block_size=16, num_layers=12, num_classes=len(class_names),algorithm="VIT")
+# Setup the optimizer to optimize our ViT model parameters using hyperparameters from the ViT paper 
+optimizer = torch.optim.Adam(params=vit.parameters(), 
+                             lr=3e-3, # Base LR from Table 3 for ViT-* ImageNet-1k
+                             betas=(0.9, 0.999), # default values but also mentioned in ViT paper section 4.1 (Training & Fine-tuning)
+                             weight_decay=0.3) # from the ViT paper section 4.1 (Training & Fine-tuning) and Table 3 for ViT-* ImageNet-1k
+
+# Setup the loss function for multi-class classification
+loss_fn = torch.nn.CrossEntropyLoss()
+# Train the model and save the training results to a dictionary
+results = engine.train(model=vit,
+                       train_dataloader=train_dataloader,
+                       test_dataloader=test_dataloader,
+                       optimizer=optimizer,
+                       loss_fn=loss_fn,
+                       epochs=15,
+                       device=device)
+
+from super_repo.utils import plot_loss_curves
+
+# Plot our ViT model's loss curves
+plot_loss_curves(results)
+
+		

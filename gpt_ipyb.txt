@@ -1,0 +1,56 @@
+import torch
+from transformers import AutoTokenizer  # pip install transformers
+
+!git clone https://github.com/deepanshudashora/custom_models.git
+
+from custom_models.transformers.gpt.train import train_gpt
+from custom_models.transformers.model import Transformer
+from custom_models.transformers.gpt.utils import (
+    BLOCK_SIZE,
+    DEVICE,
+    DROPOUT,
+    LEARNING_RATE,
+    NUM_EMBED,
+    NUM_HEAD,
+    NUM_LAYER,
+    encode,
+)
+
+# raw data
+path_do_data = "data/english.txt"
+data_raw = open(path_do_data, encoding="utf-8").read()
+# we use pretrained BERT tokenizer for performance improvements
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+vocab_size = tokenizer.vocab_size
+# data_raw = data_raw[4000000:] # short dataset
+
+# train/val split
+data = encode(text_seq=data_raw, tokenizer=tokenizer)
+n = int(0.9 * len(data))  # first 90% will be train, rest val
+train_data = data[:n]
+val_data = data[n:]
+
+# train a new model
+model = Transformer(
+    vocab_size=vocab_size,
+    embed_size=NUM_EMBED,
+    block_size=BLOCK_SIZE,
+    n_heads=NUM_HEAD,
+    num_layers=NUM_LAYER,
+    dropout=DROPOUT,
+    algorithm="GPT"
+)
+# load model to GPU if available
+m = model.to(DEVICE)
+# print the number of parameters in the model
+print(
+    "Model with {:.2f}M parameters".format(sum(p.numel() for p in m.parameters()) / 1e6)
+)
+
+# optimizer takes the model's parameters and the learning rate as input,
+# and updates the parameters during the training process in order to
+# minimize the loss function.
+optimizer = torch.optim.AdamW(m.parameters(), lr=LEARNING_RATE)
+MAX_ITER = 1500
+model = train_gpt(MAX_ITER,train_data,val_data,optimizer,model)
+
